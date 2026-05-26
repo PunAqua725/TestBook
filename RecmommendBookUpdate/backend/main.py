@@ -15,7 +15,7 @@ def hash_password(password: str) -> str:
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from recommender import recommender
-from database import get_db, init_db, User, SearchHistory, Favorite, UploadedBook
+from database import get_db, init_db, User, SearchHistory, Favorite, UploadedBook, BookReview
 
 def append_book_to_csv(book):
     try:
@@ -113,6 +113,13 @@ class BookUploadRequest(BaseModel):
     avg_rating: Optional[float] = Field(default=0.0, ge=0, le=5)
     url: Optional[str] = Field(default="#", max_length=500)
     image_url: Optional[str] = Field(default=None, max_length=500)
+
+class ReviewRequest(BaseModel):
+    user_id: int
+    book_title: str
+    book_author: Optional[str] = None
+    rating: int = Field(..., ge=1, le=5)
+    review_text: Optional[str] = Field(default=None, max_length=1000)
 
 # ── Auth Endpoints ────────────────────────────────────
 @app.post("/register")
@@ -228,14 +235,145 @@ def remove_favorite(fav_id: int, db: Session = Depends(get_db)):
     db.commit()
     return {"message": "Favorite removed"}
 
+# ── Book Reviews & Ratings ────────────────────────────
+@app.post("/reviews")
+def add_or_update_review(req: ReviewRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == req.user_id, User.is_active == True).first()
+    if not user:
+        raise HTTPException(404, "User not found or account is deactivated")
+        
+    existing = db.query(BookReview).filter(
+        BookReview.user_id == req.user_id,
+        BookReview.book_title == req.book_title
+    ).first()
+    
+    if existing:
+        existing.rating = req.rating
+        existing.review_text = req.review_text
+        existing.book_author = req.book_author
+        existing.created_at = datetime.utcnow()
+        db.commit()
+        db.refresh(existing)
+        return {"message": "Đã cập nhật nhận xét!", "review_id": existing.id}
+    
+    review = BookReview(
+        user_id=req.user_id,
+        book_title=req.book_title,
+        book_author=req.book_author,
+        rating=req.rating,
+        review_text=req.review_text
+    )
+    db.add(review)
+    db.commit()
+    db.refresh(review)
+    return {"message": "Đã gửi nhận xét thành công!", "review_id": review.id}
+
+@app.get("/reviews/book")
+def get_book_reviews(title: str = Query(...), author: Optional[str] = Query(default=None), db: Session = Depends(get_db)):
+    title_clean = title.strip().lower()
+    reviews = db.query(BookReview).filter(
+        BookReview.is_visible == True
+    ).all()
+    
+    book_reviews = [r for r in reviews if r.book_title.strip().lower() == title_clean]
+    
+    total_rating = sum(r.rating for r in book_reviews)
+    avg_rating = round(total_rating / len(book_reviews), 2) if book_reviews else 0.0
+    
+    return {
+        "reviews": [
+            {
+                "id": r.id,
+                "username": r.user.username if r.user else "Unknown",
+                "rating": r.rating,
+                "review_text": r.review_text,
+                "created_at": r.created_at.isoformat() + "Z" if r.created_at else None
+            } for r in book_reviews
+        ],
+        "avg_user_rating": avg_rating,
+        "total_reviews": len(book_reviews)
+    }
+
+@app.get("/reviews/user/{user_id}")
+def get_user_reviews(user_id: int, db: Session = Depends(get_db)):
+    reviews = db.query(BookReview).filter(
+        BookReview.user_id == user_id
+    ).order_by(BookReview.created_at.desc()).all()
+    
+    return {"reviews": [
+        {
+            "id": r.id,
+            "book_title": r.book_title,
+            "book_author": r.book_author,
+            "rating": r.rating,
+            "review_text": r.review_text,
+            "is_visible": r.is_visible,
+            "created_at": r.created_at.isoformat() + "Z" if r.created_at else None
+        } for r in reviews
+    ]}
+
+@app.delete("/reviews/{review_id}")
+def remove_review(review_id: int, user_id: int = Query(...), db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(404, "User not found")
+        
+    review = db.query(BookReview).filter(BookReview.id == review_id).first()
+    if not review:
+        raise HTTPException(404, "Review not found")
+        
+    if review.user_id != user_id and user.role != "admin":
+        raise HTTPException(403, "You do not have permission to delete this review")
+        
+    db.delete(review)
+    db.commit()
+    return {"message": "Đã xóa nhận xét thành công!"}
+
+@app.get("/admin/reviews")
+def admin_get_all_reviews(admin_id: int = Query(...), db: Session = Depends(get_db)):
+    admin = db.query(User).filter(User.id == admin_id, User.role == "admin").first()
+    if not admin:
+        raise HTTPException(403, "Admin access required")
+        
+    reviews = db.query(BookReview).order_by(BookReview.created_at.desc()).all()
+    return {"reviews": [
+        {
+            "id": r.id,
+            "book_title": r.book_title,
+            "book_author": r.book_author,
+            "username": r.user.username if r.user else "Unknown",
+            "rating": r.rating,
+            "review_text": r.review_text,
+            "is_visible": r.is_visible,
+            "created_at": r.created_at.isoformat() + "Z" if r.created_at else None
+        } for r in reviews
+    ]}
+
+@app.put("/admin/reviews/{review_id}/toggle-visibility")
+def admin_toggle_review_visibility(review_id: int, admin_id: int = Query(...), db: Session = Depends(get_db)):
+    admin = db.query(User).filter(User.id == admin_id, User.role == "admin").first()
+    if not admin:
+        raise HTTPException(403, "Admin access required")
+        
+    review = db.query(BookReview).filter(BookReview.id == review_id).first()
+    if not review:
+        raise HTTPException(404, "Review not found")
+        
+    review.is_visible = not review.is_visible
+    db.commit()
+    db.refresh(review)
+    return {"message": "Đã cập nhật trạng thái ẩn/hiện nhận xét!", "is_visible": review.is_visible}
+
 # ── User Profile Stats ────────────────────────────────
 @app.get("/users/{user_id}/stats")
 def get_user_stats(user_id: int, db: Session = Depends(get_db)):
     search_count = db.query(SearchHistory).filter(SearchHistory.user_id == user_id).count()
     fav_count = db.query(Favorite).filter(Favorite.user_id == user_id).count()
+    review_count = db.query(BookReview).filter(BookReview.user_id == user_id).count()
     return {
         "search_count": search_count,
-        "favorite_count": fav_count
+        "favorite_count": fav_count,
+        "review_count": review_count
     }
 
 # ── User Search History ────────────────────────────────

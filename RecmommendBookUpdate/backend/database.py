@@ -33,6 +33,7 @@ class User(Base):
     search_history = relationship("SearchHistory", back_populates="user")
     favorites = relationship("Favorite", back_populates="user")
     uploaded_books = relationship("UploadedBook", back_populates="uploader")
+    reviews = relationship("BookReview", back_populates="user", cascade="all, delete-orphan")
 
 
 class SearchHistory(Base):
@@ -83,6 +84,22 @@ class UploadedBook(Base):
     reviewed_at = Column(DateTime, nullable=True)
 
     uploader = relationship("User", back_populates="uploaded_books")
+
+
+class BookReview(Base):
+    __tablename__ = "book_reviews"
+
+    id = Column(Integer, primary_key=True, index=True)
+    book_title = Column(String(255), nullable=False)
+    book_author = Column(String(255), nullable=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    rating = Column(Integer, nullable=False)  # 1 to 5 stars
+    review_text = Column(String(1000), nullable=True)
+    is_visible = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", back_populates="reviews")
+
 
 
 def init_db():
