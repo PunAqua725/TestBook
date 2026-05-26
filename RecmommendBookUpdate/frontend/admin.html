@@ -81,6 +81,9 @@
             <button class="dash-tab" onclick="showDashTab('books')" id="books-tab-btn">
                 <i data-lucide="book-plus"></i> Duyệt Sách <span id="pending-badge" style="display:none; background:#ef4444; color:white; border-radius:20px; padding:0.1rem 0.45rem; font-size:0.7rem; margin-left:0.3rem; font-weight:700;">0</span>
             </button>
+            <button class="dash-tab" onclick="showDashTab('reviews')" id="reviews-tab-btn">
+                <i data-lucide="message-square"></i> Quản lý Review
+            </button>
         </div>
 
         <!-- Users Table -->
@@ -164,6 +167,22 @@
             </div>
             <p id="books-empty" class="table-empty hidden">Không có sách nào.</p>
         </div>
+
+        <!-- Reviews Moderation Tab -->
+        <div id="tab-reviews" class="dash-content glass-panel hidden">
+            <div class="table-header">
+                <h3>Danh sách Nhận xét của Bạn đọc</h3>
+            </div>
+            <div class="table-wrapper">
+                <table class="data-table">
+                    <thead>
+                        <tr><th>#</th><th>Sách</th><th>Người gửi</th><th>Điểm</th><th>Nội dung nhận xét</th><th>Trạng thái</th><th>Ngày gửi</th><th>Thao tác</th></tr>
+                    </thead>
+                    <tbody id="reviews-tbody"></tbody>
+                </table>
+            </div>
+            <p id="reviews-empty" class="table-empty hidden">Không có nhận xét nào.</p>
+        </div>
     </main>
 
     <script>
@@ -192,14 +211,17 @@
             document.getElementById('tab-users').classList.toggle('hidden', tab !== 'users');
             document.getElementById('tab-history').classList.toggle('hidden', tab !== 'history');
             document.getElementById('tab-books').classList.toggle('hidden', tab !== 'books');
+            document.getElementById('tab-reviews').classList.toggle('hidden', tab !== 'reviews');
             document.querySelectorAll('.dash-tab').forEach((t, i) => {
                 t.classList.toggle('active',
                     (i === 0 && tab === 'users') ||
                     (i === 1 && tab === 'history') ||
-                    (i === 2 && tab === 'books')
+                    (i === 2 && tab === 'books') ||
+                    (i === 3 && tab === 'reviews')
                 );
             });
             if (tab === 'books') loadBooks();
+            if (tab === 'reviews') loadReviews();
         }
 
         // Fetch stats
@@ -522,6 +544,84 @@
                 errEl.textContent = e.message;
                 errEl.style.display = 'block';
             }
+        }
+
+        // ── Review Moderation ───────────────────────────────────
+        let allReviewsData = [];
+
+        async function loadReviews() {
+            try {
+                const res = await fetch(`${API}/admin/reviews?admin_id=${currentUser.id}`);
+                if (!res.ok) return;
+                const d = await res.json();
+                allReviewsData = d.reviews || [];
+                renderReviewsList(allReviewsData);
+            } catch (e) { console.error(e); }
+        }
+
+        function renderReviewsList(reviews) {
+            const tbody = document.getElementById('reviews-tbody');
+            const empty = document.getElementById('reviews-empty');
+            tbody.innerHTML = '';
+
+            if (!reviews || reviews.length === 0) {
+                empty.classList.remove('hidden');
+                return;
+            }
+            empty.classList.add('hidden');
+
+            reviews.forEach((r, i) => {
+                const tr = document.createElement('tr');
+                const date = formatVNDate(r.created_at, true);
+                
+                const statusColor = r.is_visible ? '#10b981' : '#f59e0b';
+                const statusLabel = r.is_visible ? 'Hiện' : 'Ẩn (Spam)';
+                
+                tr.innerHTML = `
+                    <td>${i + 1}</td>
+                    <td><strong title="${esc(r.book_title)}">${esc(r.book_title.length > 25 ? r.book_title.slice(0, 25) + '…' : r.book_title)}</strong>
+                        ${r.book_author ? `<div style="font-size:0.75rem; color:var(--text-dim);">by ${esc(r.book_author)}</div>` : ''}
+                    </td>
+                    <td><strong>${esc(r.username)}</strong></td>
+                    <td><span style="color:var(--warning); font-weight:700;">★ ${r.rating}</span></td>
+                    <td style="max-width:300px; word-wrap:break-word; white-space:normal;" title="${esc(r.review_text || '')}">
+                        ${esc(r.review_text || '—')}
+                    </td>
+                    <td><span style="font-size:0.75rem; font-weight:600; padding:0.2rem 0.6rem; border-radius:20px; background:${statusColor}22; color:${statusColor};">${statusLabel}</span></td>
+                    <td>${date}</td>
+                    <td style="display:flex; gap:0.4rem;">
+                        <button class="btn-toggle" style="background:${r.is_visible ? '#f59e0b' : '#10b981'}; color:white; font-size:0.75rem; padding:0.25rem 0.6rem;" onclick="toggleReviewVisibility(${r.id})">
+                            ${r.is_visible ? '✕ Ẩn' : '✓ Hiện'}
+                        </button>
+                        <button class="btn-toggle" style="background:#ef4444; color:white; font-size:0.75rem; padding:0.25rem 0.6rem;" onclick="adminDeleteReview(${r.id})">
+                            ✕ Xóa
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+            if (window.lucide) lucide.createIcons();
+        }
+
+        async function toggleReviewVisibility(reviewId) {
+            try {
+                const res = await fetch(`${API}/admin/reviews/${reviewId}/toggle-visibility?admin_id=${currentUser.id}`, {
+                    method: 'PUT'
+                });
+                if (!res.ok) throw new Error('Không thể cập nhật trạng thái');
+                await loadReviews();
+            } catch (e) { alert(e.message); }
+        }
+
+        async function adminDeleteReview(reviewId) {
+            if (!confirm('Bạn có chắc chắn muốn xóa vĩnh viễn nhận xét này?')) return;
+            try {
+                const res = await fetch(`${API}/reviews/${reviewId}?user_id=${currentUser.id}`, {
+                    method: 'DELETE'
+                });
+                if (!res.ok) throw new Error('Không thể xóa nhận xét');
+                await loadReviews();
+            } catch (e) { alert(e.message); }
         }
     </script>
 </body>

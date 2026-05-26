@@ -397,6 +397,29 @@ document.addEventListener('DOMContentLoaded', () => {
         const hash = Array.from(book.title || '').reduce((acc, char) => acc + char.charCodeAt(0), 0);
         const gradIndex = hash % 6;
 
+        let activeRating = 5;
+        const reviewFormHtml = currentUser ? `
+            <div class="review-form-panel">
+                <div style="font-size:0.85rem; font-weight:600; margin-bottom:0.5rem; color:var(--text-main);">Viết nhận xét của bạn</div>
+                <div class="review-stars-selector" id="modal-rating-selector">
+                    <button type="button" class="star-btn active" data-value="1"><i data-lucide="star"></i></button>
+                    <button type="button" class="star-btn active" data-value="2"><i data-lucide="star"></i></button>
+                    <button type="button" class="star-btn active" data-value="3"><i data-lucide="star"></i></button>
+                    <button type="button" class="star-btn active" data-value="4"><i data-lucide="star"></i></button>
+                    <button type="button" class="star-btn active" data-value="5"><i data-lucide="star"></i></button>
+                </div>
+                <textarea class="review-textarea" id="modal-review-text" placeholder="Nhập cảm nhận của bạn về cuốn sách này... (Tối đa 1000 ký tự)" maxlength="1000"></textarea>
+                <div id="modal-review-error" style="display:none; color:var(--error); font-size:0.75rem; margin-bottom:0.5rem;"></div>
+                <button type="button" class="btn-primary btn-sm" id="modal-review-submit-btn" style="width:100%; justify-content:center; padding: 0.5rem 1rem;">
+                    <i data-lucide="send" style="width:13px; height:13px;"></i> Gửi nhận xét
+                </button>
+            </div>
+        ` : `
+            <div class="review-form-panel" style="text-align:center; padding:1.5rem; color:var(--text-muted); font-size:0.85rem;">
+                Vui lòng đăng nhập để đánh giá & bình luận cuốn sách này.
+            </div>
+        `;
+
         modalContent.innerHTML = `
             <div class="modal-genre-strip"></div>
             <div class="modal-body-layout">
@@ -411,14 +434,27 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="modal-info-container">
                     <h2 class="modal-title">${esc(book.title)}</h2>
                     <p class="modal-author">by ${esc(book.author)}</p>
-                    <div class="modal-rating"><i data-lucide="star"></i><span>${book.rating || 'N/A'} / 5.0</span></div>
+                    <div class="modal-rating" id="modal-avg-user-rating"><i data-lucide="star"></i><span>${book.rating || 'N/A'} / 5.0</span></div>
                     <p class="modal-desc">${esc(book.description)}</p>
                     <div class="modal-genres">${genres.map(g => `<span class="genre-tag">${esc(g.trim())}</span>`).join('')}</div>
                     <a href="${bookUrl}" target="${bookUrl.startsWith('http') ? '_blank' : '_self'}" class="modal-link">
                         <i data-lucide="book-open"></i> View on Goodreads
                     </a>
                 </div>
-            </div>`;
+            </div>
+            
+            <hr style="margin: 1.5rem 0; border: none; border-top: 1px solid var(--glass-border);">
+            
+            <div class="modal-reviews-section">
+                <div class="reviews-title"><i data-lucide="message-square"></i> Đánh giá từ Bạn đọc</div>
+                <div class="reviews-grid-layout">
+                    <div class="reviews-list-container" id="modal-reviews-list">
+                        <div style="text-align: center; color: var(--text-dim); padding: 1.5rem 0; font-size: 0.82rem;">Đang tải nhận xét...</div>
+                    </div>
+                    ${reviewFormHtml}
+                </div>
+            </div>
+        `;
         
         modal.classList.remove('hidden');
         document.body.style.overflow = 'hidden';
@@ -426,7 +462,132 @@ document.addEventListener('DOMContentLoaded', () => {
         // Fetch large cover in modal (passing database image_url if available)
         loadBookCover(book.title, book.author, modalContent.querySelector('.modal-cover-container'), book.image_url);
         
+        // Fetch book reviews
+        loadBookReviews(book.title, book.author, modalContent);
+        
+        // Wire up review form interactivity
+        if (currentUser) {
+            const selector = modalContent.querySelector('#modal-rating-selector');
+            const stars = selector.querySelectorAll('.star-btn');
+            stars.forEach(s => {
+                s.addEventListener('click', () => {
+                    const val = parseInt(s.dataset.value);
+                    activeRating = val;
+                    stars.forEach(btn => {
+                        const btnVal = parseInt(btn.dataset.value);
+                        btn.classList.toggle('active', btnVal <= val);
+                        btn.querySelector('svg').style.fill = btnVal <= val ? 'var(--warning)' : 'none';
+                    });
+                });
+            });
+            
+            const submitBtn = modalContent.querySelector('#modal-review-submit-btn');
+            submitBtn.addEventListener('click', async () => {
+                const text = modalContent.querySelector('#modal-review-text').value.trim();
+                const errEl = modalContent.querySelector('#modal-review-error');
+                errEl.style.display = 'none';
+                
+                submitBtn.disabled = true;
+                submitBtn.innerHTML = '<i data-lucide="loader"></i> Đang gửi...';
+                if (window.lucide) lucide.createIcons();
+                
+                try {
+                    const res = await fetch(`${API}/reviews`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            user_id: currentUser.id,
+                            book_title: book.title,
+                            book_author: book.author || null,
+                            rating: activeRating,
+                            review_text: text || null
+                        })
+                    });
+                    const d = await res.json();
+                    if (!res.ok) throw new Error(d.detail || 'Lỗi khi gửi nhận xét');
+                    
+                    // Reload reviews
+                    loadBookReviews(book.title, book.author, modalContent);
+                    // Clear textarea
+                    modalContent.querySelector('#modal-review-text').value = '';
+                    
+                    // Refresh library stats in background
+                    fetchFavoritesAndStats();
+                } catch(e) {
+                    errEl.textContent = e.message;
+                    errEl.style.display = 'block';
+                } finally {
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = '<i data-lucide="send"></i> Gửi nhận xét';
+                    if (window.lucide) lucide.createIcons();
+                }
+            });
+        }
+        
         if (window.lucide) lucide.createIcons();
+    }
+
+    async function loadBookReviews(title, author, container) {
+        if (!container) return;
+        
+        try {
+            const cleanTitle = title.trim();
+            const res = await fetch(`${API}/reviews/book?title=${encodeURIComponent(cleanTitle)}`);
+            if (!res.ok) throw new Error("Could not load reviews");
+            const data = await res.json();
+            
+            const listEl = container.querySelector('#modal-reviews-list');
+            const avgEl = container.querySelector('#modal-avg-user-rating');
+            
+            if (avgEl) {
+                avgEl.innerHTML = data.avg_user_rating > 0 
+                    ? `<i data-lucide="star" style="width:14px; height:14px; fill:var(--warning)"></i> <span>User rating: ${data.avg_user_rating} / 5.0 (${data.total_reviews} reviews)</span>`
+                    : `<i data-lucide="star" style="width:14px; height:14px;"></i> <span>Chưa có đánh giá từ User</span>`;
+            }
+            
+            if (listEl) {
+                listEl.innerHTML = '';
+                const reviews = data.reviews || [];
+                
+                if (reviews.length === 0) {
+                    listEl.innerHTML = `<div style="text-align: center; color: var(--text-dim); padding: 1.5rem 0; font-size: 0.82rem;">Hãy là người đầu tiên nhận xét cuốn sách này!</div>`;
+                } else {
+                    reviews.forEach(r => {
+                        const card = document.createElement('div');
+                        card.className = 'review-card';
+                        
+                        let starsHtml = '';
+                        for (let i = 1; i <= 5; i++) {
+                            starsHtml += `<i data-lucide="star" style="width:10px; height:10px; ${i <= r.rating ? 'fill:var(--warning); color:var(--warning)' : 'color:var(--text-dim)'}"></i>`;
+                        }
+                        
+                        // Parse date
+                        let dateStr = 'Mới đây';
+                        if (r.created_at) {
+                            try {
+                                const d = new Date(r.created_at);
+                                dateStr = d.toLocaleDateString('vi-VN');
+                            } catch(e) {}
+                        }
+                        
+                        card.innerHTML = `
+                            <div class="review-card-header">
+                                <span class="review-username">${esc(r.username)}</span>
+                                <span class="review-date">${dateStr}</span>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 0.25rem; margin-bottom: 0.4rem;">
+                                <div class="review-rating-stars">${starsHtml}</div>
+                            </div>
+                            <div class="review-card-body">${esc(r.review_text || 'Chỉ đánh giá sao.')}</div>
+                        `;
+                        listEl.appendChild(card);
+                    });
+                }
+            }
+            if (window.lucide) lucide.createIcons();
+        } catch(e) {
+            console.error("Error loading book reviews:", e);
+        }
     }
 
     function closeModal() {
@@ -515,6 +676,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const stats = await statsRes.json();
                 document.getElementById('user-stat-searches').textContent = stats.search_count;
                 document.getElementById('user-stat-favorites').textContent = stats.favorite_count;
+                const revStatEl = document.getElementById('user-stat-reviews');
+                if (revStatEl) revStatEl.textContent = stats.review_count;
             }
 
             // Fetch favorites
@@ -541,8 +704,72 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (uploadStatEl) uploadStatEl.textContent = uploads.length;
                 renderContributionsList(uploads);
             }
+
+            // Fetch user reviews
+            const reviewsRes = await fetch(`${API}/reviews/user/${currentUser.id}`);
+            if (reviewsRes.ok) {
+                const data = await reviewsRes.json();
+                renderUserReviewsList(data.reviews || []);
+            }
         } catch (err) {
             console.error("Error fetching library data:", err);
+        }
+    }
+
+    function renderUserReviewsList(reviews) {
+        const container = document.getElementById('reviews-list-container');
+        if (!container) return;
+        container.innerHTML = '';
+        
+        if (!reviews || reviews.length === 0) {
+            container.innerHTML = `<div style="text-align: center; color: var(--text-muted); padding: 2rem 0;">Chưa có nhận xét nào. Hãy chấm điểm cho sách nhé!</div>`;
+            return;
+        }
+
+        reviews.forEach(r => {
+            const item = document.createElement('div');
+            item.className = 'fav-item';
+            
+            let starsHtml = '';
+            for (let i = 1; i <= 5; i++) {
+                starsHtml += `<i data-lucide="star" style="width:10px; height:10px; ${i <= r.rating ? 'fill:var(--warning); color:var(--warning)' : 'color:var(--text-dim)'}"></i>`;
+            }
+            
+            const visibilityBadge = r.is_visible 
+                ? '' 
+                : `<span style="font-size:0.7rem; font-weight:600; padding:0.15rem 0.45rem; border-radius:20px; color:#ef4444; background:rgba(239,68,68,0.15); margin-left:0.5rem;">Đã bị Ẩn (Spam)</span>`;
+
+            item.innerHTML = `
+                <div style="flex: 1; min-width: 0; padding-right: 0.5rem;">
+                    <div class="fav-title">${esc(r.book_title)} ${visibilityBadge}</div>
+                    <div class="fav-meta" style="margin-bottom:0.25rem;">Tác giả: ${esc(r.book_author || 'Unknown')}</div>
+                    <div style="display:flex; align-items:center; gap:2px; margin-bottom:0.25rem;">${starsHtml}</div>
+                    <div style="font-size:0.8rem; color:var(--text-muted); line-height:1.3; overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;">${esc(r.review_text || 'Không có nhận xét.')}</div>
+                </div>
+                <div style="display: flex; gap: 0.5rem; align-items: center; flex-shrink:0;">
+                    <button class="btn-ghost" onclick="removeReviewFromList(${r.id})" style="color: #ef4444; padding: 0.25rem; border-radius: 4px;" title="Xóa nhận xét">
+                        <i data-lucide="trash-2" style="width:16px; height:16px;"></i>
+                    </button>
+                </div>
+            `;
+            container.appendChild(item);
+        });
+        if (window.lucide) lucide.createIcons();
+    }
+
+    window.removeReviewFromList = async function(reviewId) {
+        if (!confirm("Bạn có chắc chắn muốn xóa nhận xét này không?")) return;
+        
+        try {
+            const res = await fetch(`${API}/reviews/${reviewId}?user_id=${currentUser.id}`, {
+                method: 'DELETE'
+            });
+            if (!res.ok) throw new Error("Không thể xóa nhận xét");
+            
+            // Reload stats and user lists
+            await fetchFavoritesAndStats();
+        } catch(err) {
+            alert(err.message);
         }
     }
 

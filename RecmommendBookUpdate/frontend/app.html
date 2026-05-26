@@ -155,18 +155,22 @@
             <p class="subtitle" style="margin-bottom: 1.5rem; font-size: 0.9rem; color: var(--text-muted);">Your personalized dashboard and saved reading list.</p>
             
             <!-- User Stats -->
-            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin-bottom: 1.5rem;">
+            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.5rem;">
                 <div class="stat-card glass-panel" style="padding: 1rem; text-align: center; background: rgba(255,255,255,0.03);">
                     <div style="font-size: 0.85rem; color: var(--text-muted);">Total AI Searches</div>
-                    <div id="user-stat-searches" style="font-size: 2rem; font-weight: 700; color: var(--accent-color); margin-top: 0.25rem;">0</div>
+                    <div id="user-stat-searches" style="font-size: 1.7rem; font-weight: 700; color: var(--accent-color); margin-top: 0.25rem;">0</div>
                 </div>
                 <div class="stat-card glass-panel" style="padding: 1rem; text-align: center; background: rgba(255,255,255,0.03);">
                     <div style="font-size: 0.85rem; color: var(--text-muted);">Saved Favorites</div>
-                    <div id="user-stat-favorites" style="font-size: 2rem; font-weight: 700; color: #ef4444; margin-top: 0.25rem;">0</div>
+                    <div id="user-stat-favorites" style="font-size: 1.7rem; font-weight: 700; color: #ef4444; margin-top: 0.25rem;">0</div>
                 </div>
                 <div class="stat-card glass-panel" style="padding: 1rem; text-align: center; background: rgba(255,255,255,0.03);">
-                    <div style="font-size: 0.85rem; color: var(--text-muted);">Sách đã đóng góp</div>
-                    <div id="user-stat-uploads" style="font-size: 2rem; font-weight: 700; color: #10b981; margin-top: 0.25rem;">0</div>
+                    <div style="font-size: 0.85rem; color: var(--text-muted);">Sách đóng góp</div>
+                    <div id="user-stat-uploads" style="font-size: 1.7rem; font-weight: 700; color: #10b981; margin-top: 0.25rem;">0</div>
+                </div>
+                <div class="stat-card glass-panel" style="padding: 1rem; text-align: center; background: rgba(255,255,255,0.03);">
+                    <div style="font-size: 0.85rem; color: var(--text-muted);">Nhận xét của tôi</div>
+                    <div id="user-stat-reviews" style="font-size: 1.7rem; font-weight: 700; color: #f59e0b; margin-top: 0.25rem;">0</div>
                 </div>
             </div>
 
@@ -180,6 +184,9 @@
                 </button>
                 <button id="lib-tab-btn-contributions" class="lib-tab-btn" onclick="switchLibTab('contributions')" style="display:flex;align-items:center;gap:0.4rem;padding:0.4rem 0.85rem;border-radius:6px;border:none;cursor:pointer;font-size:0.85rem;font-weight:600;background:rgba(255,255,255,0.08);color:var(--text-muted);transition:all 0.2s;">
                     <i data-lucide="upload" style="width:13px;height:13px;"></i> Đóng góp của tôi
+                </button>
+                <button id="lib-tab-btn-reviews" class="lib-tab-btn" onclick="switchLibTab('reviews')" style="display:flex;align-items:center;gap:0.4rem;padding:0.4rem 0.85rem;border-radius:6px;border:none;cursor:pointer;font-size:0.85rem;font-weight:600;background:rgba(255,255,255,0.08);color:var(--text-muted);transition:all 0.2s;">
+                    <i data-lucide="message-square" style="width:13px;height:13px;"></i> Nhận xét của tôi
                 </button>
             </div>
 
@@ -211,6 +218,13 @@
                 </div>
                 <div id="contributions-list-container" style="max-height: 300px; overflow-y: auto; display: flex; flex-direction: column; gap: 0.75rem; padding-right: 0.5rem;">
                     <div style="text-align: center; color: var(--text-muted); padding: 2rem 0;">Chưa có sách nào được đóng góp. Nhấn nút bên trên để bắt đầu!</div>
+                </div>
+            </div>
+
+            <!-- Tab: My Reviews -->
+            <div id="lib-tab-reviews" style="display:none;">
+                <div id="reviews-list-container" style="max-height: 300px; overflow-y: auto; display: flex; flex-direction: column; gap: 0.75rem; padding-right: 0.5rem;">
+                    <div style="text-align: center; color: var(--text-muted); padding: 2rem 0;">Chưa có đánh giá nào. Bạn hãy chấm điểm cho sách nhé!</div>
                 </div>
             </div>
         </div>
@@ -360,7 +374,7 @@
 
         // ── Library Tabs ─────────────────────────────────
         window.switchLibTab = function(tab) {
-            ['saved', 'history', 'contributions'].forEach(t => {
+            ['saved', 'history', 'contributions', 'reviews'].forEach(t => {
                 const tabEl = document.getElementById(`lib-tab-${t}`);
                 const btnEl = document.getElementById(`lib-tab-btn-${t}`);
                 if (tabEl) tabEl.style.display = (t === tab) ? '' : 'none';
